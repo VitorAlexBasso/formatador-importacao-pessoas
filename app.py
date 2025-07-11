@@ -45,11 +45,13 @@ def detectar_tipo(doc):
 def escolher_mais_completo(duplicatas):
     return duplicatas.loc[duplicatas.count(axis=1).idxmax()]
 
-if uploaded_file:
-    if uploaded_file.name.endswith('.csv'):
-        df_origem = pd.read_csv(uploaded_file)
-    else:
-        df_origem = pd.read_excel(uploaded_file)
+if uploaded_file.name.endswith('.csv'):
+    try:
+        df_origem = pd.read_csv(uploaded_file, encoding='utf-8')
+    except UnicodeDecodeError:
+        df_origem = pd.read_csv(uploaded_file, encoding='latin1')
+else:
+    df_origem = pd.read_excel(uploaded_file)
 
     colunas = df_origem.columns
     dados = {}

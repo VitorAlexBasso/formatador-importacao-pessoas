@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -35,14 +34,6 @@ def identificar_coluna(possibilidades, colunas):
                 return c
     return None
 
-def aplicar_mascara_documento(doc):
-    doc = re.sub(r'\D', '', str(doc))
-    if len(doc) == 11:
-        return f"{doc[:3]}.{doc[3:6]}.{doc[6:9]}-{doc[9:]}"
-    elif len(doc) == 14:
-        return f"{doc[:2]}.{doc[2:5]}.{doc[5:8]}/{doc[8:12]}-{doc[12:]}"
-    return doc
-
 def detectar_tipo(doc):
     doc = re.sub(r'\D', '', str(doc))
     if len(doc) == 11:
@@ -76,11 +67,14 @@ if uploaded_file:
     dados['cpf'] = dados['cpf'].apply(lambda x: x if len(x) in [11, 14] else np.nan)
     dados['cpf'] = dados['cpf'].fillna("")
     dados['tipo'] = dados['cpf'].apply(detectar_tipo)
-    dados['cpf'] = dados['cpf'].apply(aplicar_mascara_documento)
-    dados['razao_social'] = dados['razao_social'].fillna("NOME NÃO INFORMADO")
+    dados['razao_social'] = dados['razao_social'].fillna("NOME NAO INFORMADO")
 
-    # Se for tipo F (física), não preenche fantasia
-    dados['fantasia'] = np.where(dados['tipo'] == 'J', dados['fantasia'], '')
+    # Corrigir nome fantasia: preencher apenas se for PJ e se houver dado diferente de razao_social
+    dados['fantasia'] = np.where(
+        (dados['tipo'] == 'J') & (dados['fantasia'].notna()) & (dados['fantasia'] != dados['razao_social']),
+        dados['fantasia'],
+        ''
+    )
 
     # Criar DataFrame final com 27 colunas do modelo
     colunas_finais = [
@@ -96,7 +90,7 @@ if uploaded_file:
         df_final[campo] = dados.get(campo, '')
 
     # Remover duplicados por CPF, mantendo o mais completo
-    df_final['cpf_temp'] = df_final['cpf'].str.replace(r'\D', '', regex=True)
+    df_final['cpf_temp'] = df_final['cpf']
     df_final = df_final.groupby('cpf_temp', as_index=False).apply(escolher_mais_completo).reset_index(drop=True)
     df_final.drop(columns='cpf_temp', inplace=True)
 

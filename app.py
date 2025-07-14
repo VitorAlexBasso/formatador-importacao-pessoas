@@ -44,14 +44,16 @@ def detectar_tipo(doc):
 def escolher_mais_completo(duplicatas):
     return duplicatas.loc[duplicatas.count(axis=1).idxmax()]
 
-if uploaded_file:
+if uploaded_file is not None:
     if uploaded_file.name.endswith('.csv'):
         try:
-            df_origem = pd.read_csv(uploaded_file, encoding='utf-8')
+            df_origem = pd.read_csv(uploaded_file, encoding='utf-8', sep=None, engine='python')
         except UnicodeDecodeError:
-            df_origem = pd.read_csv(uploaded_file, encoding='latin1')
+            df_origem = pd.read_csv(uploaded_file, encoding='latin1', sep=None, engine='python')
     else:
         df_origem = pd.read_excel(uploaded_file)
+
+    # o restante do processamento vem aqui (análise, tratamento, exportação etc.)
 
     colunas = df_origem.columns
     dados = {}

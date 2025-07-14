@@ -19,12 +19,11 @@ Suporta CSV e Excel (XLSX, XLS).
 """)
 
 # File upload section
-with st.expander("📤 Fazer Upload da Planilha", expanded=True):
-    uploaded_file = st.file_uploader(
-        "Selecione seu arquivo",
-        type=["csv", "xlsx", "xls"],
-        help="Arquivos CSV devem usar vírgulas e ter cabeçalhos"
-    )
+uploaded_file = st.file_uploader(
+    "Selecione seu arquivo (CSV ou Excel)",
+    type=["csv", "xlsx", "xls"],
+    help="Arquivos CSV devem usar vírgulas e ter cabeçalhos"
+)
 
 # Column mapping configuration
 COLUMN_MAPPINGS = {
@@ -40,15 +39,10 @@ COLUMN_MAPPINGS = {
     'uf': ['uf', 'estado']
 }
 
-# Target output structure
-TARGET_COLUMNS = [
-    'codigo', 'razao_social', 'fantasia', 'cpf', 'tipo',
-    'email', 'celular', 'cep', 'endereco', 'numero',
-    'bairro', 'cidade', 'uf', 'observacao'
-]
-
 def clean_document(doc):
     """Clean and validate CPF/CNPJ numbers"""
+    if pd.isna(doc) or doc == "":
+        return "", ""
     doc = re.sub(r'\D', '', str(doc))
     if len(doc) == 11:
         return doc, "F"
@@ -88,39 +82,53 @@ def map_columns(df):
                 mapped[target] = df[source].astype(str)
                 break
         else:
-            mapped[target] = np.nan
+            mapped[target] = pd.Series([""] * len(df), dtype=str
     return mapped
 
-def process_data(uploaded_file):
+def process_data(file):
     """Main processing pipeline"""
-    if uploaded_file is None:
+    if file is None:
         return None
     
     # Read file
     with st.spinner("Lendo arquivo..."):
-        df = read_data_file(uploaded_file)
-        if df is None:
+        df = read_data_file(file)
+        if df is None or df.empty:
+            st.error("O arquivo está vazio ou não pôde ser lido")
             return None
     
     # Map columns
     with st.spinner("Mapeando colunas..."):
         mapped_data = map_columns(df)
+        if 'cpf' not in mapped_data:
+            st.error("Nenhuma coluna de CPF/CNPJ encontrada no arquivo")
+            return None
     
     # Clean and transform data
     with st.spinner("Processando dados..."):
-        # Document cleaning
-        mapped_data['cpf'], mapped_data['tipo'] = zip(*mapped_data['cpf'].apply(clean_document))
-        
-        # Handle missing values
-        mapped_data['razao_social'] = mapped_data['razao_social'].fillna("NÃO INFORMADO")
-        
-        # Create output dataframe
-        output_df = pd.DataFrame({k: mapped_data.get(k, '') for k in TARGET_COLUMNS})
-        
-        # Remove duplicates
-        output_df = output_df.drop_duplicates(subset=['cpf'], keep='first')
-    
-    return output_df
+        try:
+            # Document cleaning
+            documents = mapped_data['cpf'].apply(clean_document)
+            mapped_data['cpf'], mapped_data['tipo'] = zip(*documents)
+            
+            # Handle missing values
+            mapped_data['razao_social'] = mapped_data.get('razao_social', pd.Series(["NÃO INFORMADO"] * len(df)))
+            
+            # Create output dataframe
+            output_cols = [
+                'codigo', 'razao_social', 'fantasia', 'cpf', 'tipo',
+                'email', 'celular', 'cep', 'endereco', 'numero',
+                'bairro', 'cidade', 'uf', 'observacao'
+            ]
+            output_df = pd.DataFrame({k: mapped_data.get(k, "") for k in output_cols})
+            
+            # Remove duplicates
+            output_df = output_df.drop_duplicates(subset=['cpf'], keep='first')
+            return output_df
+            
+        except Exception as e:
+            st.error(f"Erro no processamento: {str(e)}")
+            return None
 
 # Main app flow
 if uploaded_file:
@@ -150,17 +158,9 @@ with st.expander("⚠️ Problemas com CSV?"):
     st.markdown("""
     **Soluções para erros comuns:**
     
-    1. **Erro de formatação**:
-       - Verifique se todas as linhas têm o mesmo número de colunas
-       - Certifique-se de que campos com vírgulas estão entre aspas (`"`)
-    
-    2. **Problemas de encoding**:
-       - Tente salvar seu CSV como UTF-8 antes de enviar
-    
-    3. **Dados faltantes**:
-       - Colunas não reconhecidas serão preenchidas com vazio
+    1. **Certifique-se que seu arquivo tem cabeçalhos**
+    2. **Coluna CPF/CNPJ deve existir com um destes nomes:**
+       - cpf, cnpj, documento
+    3. **Para problemas de formatação:**
+       - Salve como Excel (.xlsx) e tente novamente
     """)
-
-# Footer
-st.markdown("---")
-st.caption("Ferramenta desenvolvida para padronização de dados pessoais")

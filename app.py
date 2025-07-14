@@ -4,15 +4,29 @@ import numpy as np
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Formatador de Planilhas - Importação de Pessoas", layout="centered")
+# Configure page
+st.set_page_config(
+    page_title="Formatador de Planilhas - Importação de Pessoas", 
+    layout="centered",
+    page_icon="🧾"
+)
 
+# App title and description
 st.title("🧾 Formatador de Planilhas para Importação de Pessoas")
+st.markdown("""
+Faça upload de uma planilha com dados diversos (CPF, Razão Social, Email, etc.) e receba um arquivo formatado para importação.
+""")
 
-st.markdown("Faça upload de uma planilha com dados diversos (CPF, Razão Social, Email, etc.) e receba um arquivo formatado para importação.")
+# File uploader with explicit CSV support
+uploaded_file = st.file_uploader(
+    "📁 Faça o upload da planilha",
+    type=["xlsx", "xls", "csv"],
+    accept_multiple_files=False,
+    help="Formatos suportados: Excel (.xlsx, .xls) ou CSV (.csv)"
+)
 
-uploaded_file = st.file_uploader("📁 Faça o upload da planilha", type=["xlsx", "xls", "csv"])
-
-colunas_referencia = {
+# Column mapping dictionary
+COLUMN_MAPPING = {
     'razao_social': ['nome', 'razao', 'razao_social', 'cliente', 'empresa'],
     'fantasia': ['fantasia', 'nome_fantasia'],
     'cpf': ['cpf', 'cnpj', 'documento'],
@@ -26,14 +40,24 @@ colunas_referencia = {
     'uf': ['uf', 'estado']
 }
 
-def identificar_coluna(possibilidades, colunas):
-    for nome in possibilidades:
-        for c in colunas:
-            if nome.lower() in str(c).lower():
-                return c
+# Target output columns
+TARGET_COLUMNS = [
+    'codigo', 'razao_social', 'fantasia', 'cpf', 'rg', 'inscricao_estadual', 'inscricao_municipal',
+    'tipo', 'telefone', 'celular', 'email', 'site', 'data_nascimento', 'cep', 'endereco',
+    'numero', 'complemento', 'bairro', 'ponto_referencia', 'cidade', 'uf', 'pais', 'brasileiro',
+    'passaporte', 'sexo', 'veiculo', 'estado_civil', 'profissao', 'observacao'
+]
+
+def identify_column(possible_names, available_columns):
+    """Find matching column name from possible variations"""
+    for name in possible_names:
+        for col in available_columns:
+            if name.lower() in str(col).lower():
+                return col
     return None
 
-def detectar_tipo(doc):
+def detect_document_type(doc):
+    """Identify if document is CPF (F) or CNPJ (J)"""
     doc = re.sub(r'\D', '', str(doc))
     if len(doc) == 11:
         return "F"
@@ -41,173 +65,83 @@ def detectar_tipo(doc):
         return "J"
     return ""
 
-def escolher_mais_completo(duplicatas):
-    return duplicatas.loc[duplicatas.count(axis=1).idxmax()]
+def select_most_complete_row(duplicates):
+    """Select the row with most complete data from duplicates"""
+    return duplicates.loc[duplicates.count(axis=1).idxmax()]
 
 if uploaded_file is not None:
-    if uploaded_file.name.endswith('.csv'):
-        try:
-            df_origem = pd.read_csv(uploaded_file, encoding='utf-8', sep=None, engine='python')
-        except UnicodeDecodeError:
-            df_origem = pd.read_csv(uploaded_file, encoding='latin1', sep=None, engine='python')
-    else:
-        df_origem = pd.read_excel(uploaded_file)
-
-    # o restante do processamento vem aqui (análise, tratamento, exportação etc.)
-
-    colunas = df_origem.columns
-    dados = {}
-
-    for destino, sinonimos in colunas_referencia.items():
-        coluna = identificar_coluna(sinonimos, colunas)
-        if coluna:
-            dados[destino] = df_origem[coluna].astype(str)
-        else:
-            dados[destino] = np.nan
-
-    dados['cpf'] = dados['cpf'].apply(lambda x: re.sub(r'\D', '', str(x)))
-    dados['cpf'] = dados['cpf'].apply(lambda x: x if len(x) in [11, 14] else np.nan)
-    dados['cpf'] = dados['cpf'].fillna("")
-    dados['tipo'] = dados['cpf'].apply(detectar_tipo)
-    dados['razao_social'] = dados['razao_social'].fillna("NOME NAO INFORMADO")
-
-    dados['fantasia'] = np.where(
-        (dados['tipo'] == 'J') & (dados['fantasia'].notna()) & (dados['fantasia'] != dados['razao_social']),
-        dados['fantasia'],
-        ''
-    )
-
-    colunas_finais = [
-        'codigo', 'razao_social', 'fantasia', 'cpf', 'rg', 'inscricao_estadual', 'inscricao_municipal',
-        'tipo', 'telefone', 'celular', 'email', 'site', 'data_nascimento', 'cep', 'endereco',
-        'numero', 'complemento', 'bairro', 'ponto_referencia', 'cidade', 'uf', 'pais', 'brasileiro',
-        'passaporte', 'sexo', 'veiculo', 'estado_civil', 'profissao', 'observacao'
-    ]
-    df_final = pd.DataFrame(columns=colunas_finais)
-
-    for campo in ['razao_social', 'fantasia', 'cpf', 'tipo', 'celular', 'email', 'cep', 'bairro', 'endereco', 'numero', 'cidade', 'uf']:
-        df_final[campo] = dados.get(campo, '')
-
-    df_final['cpf_temp'] = df_final['cpf']
-    df_final = df_final.groupby('cpf_temp', as_index=False).apply(escolher_mais_completo).reset_index(drop=True)
-    df_final.drop(columns='cpf_temp', inplace=True)
-
-    for col in df_final.columns:
-        df_final[col] = df_final[col].astype(str)
-
-    st.success("✅ Planilha formatada com sucesso!")
-
-    buffer = BytesIO()
-    df_final.to_excel(buffer, index=False)
-    buffer.seek(0)
-
-    st.download_button(
-        label="📥 Baixar Planilha Formatada",
-        data=buffer,
-        file_name="planilha_formatada_para_importacao.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-
-st.set_page_config(page_title="Formatador de Planilhas - Importação de Pessoas", layout="centered")
-
-st.title("🧾 Formatador de Planilhas para Importação de Pessoas")
-
-st.markdown("Faça upload de uma planilha com dados diversos (CPF, Razão Social, Email, etc.) e receba um arquivo formatado para importação.")
-
-uploaded_modelo = st.file_uploader("📁 Upload do modelo de destino", type=["xlsx"])
-
-# Dicionário de sinônimos para mapear colunas variadas
-colunas_referencia = {
-    'razao_social': ['nome', 'razao', 'razao_social', 'cliente', 'empresa'],
-    'fantasia': ['fantasia', 'nome_fantasia'],
-    'cpf': ['cpf', 'cnpj', 'documento'],
-    'email': ['email', 'e-mail'],
-    'celular': ['celular', 'whatsapp', 'telefone_celular', 'telefone'],
-    'cep': ['cep'],
-    'bairro': ['bairro'],
-    'endereco': ['endereco', 'logradouro', 'rua'],
-    'numero': ['numero', 'número', 'num'],
-    'cidade': ['cidade', 'municipio'],
-    'uf': ['uf', 'estado']
-}
-
-def identificar_coluna(possibilidades, colunas):
-    for nome in possibilidades:
-        for c in colunas:
-            if nome.lower() in str(c).lower():
-                return c
-    return None
-
-def detectar_tipo(doc):
-    doc = re.sub(r'\D', '', str(doc))
-    if len(doc) == 11:
-        return "F"
-    elif len(doc) == 14:
-        return "J"
-    return ""
-
-def escolher_mais_completo(duplicatas):
-    return duplicatas.loc[duplicatas.count(axis=1).idxmax()]
-
-if uploaded_file.name.endswith('.csv'):
     try:
-        df_origem = pd.read_csv(uploaded_file, encoding='utf-8', sep=None, engine='python')
-    except UnicodeDecodeError:
-        df_origem = pd.read_csv(uploaded_file, encoding='latin1', sep=None, engine='python')
-else:
-    df_origem = pd.read_excel(uploaded_file)
-
-
-    colunas = df_origem.columns
-    dados = {}
-
-    for destino, sinonimos in colunas_referencia.items():
-        coluna = identificar_coluna(sinonimos, colunas)
-        if coluna:
-            dados[destino] = df_origem[coluna].astype(str)
+        # Read file based on type
+        if uploaded_file.name.lower().endswith('.csv'):
+            try:
+                df = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv(uploaded_file, encoding='latin1')
         else:
-            dados[destino] = np.nan
-
-    dados['cpf'] = dados['cpf'].apply(lambda x: re.sub(r'\D', '', str(x)))
-    dados['cpf'] = dados['cpf'].apply(lambda x: x if len(x) in [11, 14] else np.nan)
-    dados['cpf'] = dados['cpf'].fillna("")
-    dados['tipo'] = dados['cpf'].apply(detectar_tipo)
-    dados['razao_social'] = dados['razao_social'].fillna("NOME NAO INFORMADO")
-
-    dados['fantasia'] = np.where(
-        (dados['tipo'] == 'J') & (dados['fantasia'].notna()) & (dados['fantasia'] != dados['razao_social']),
-        dados['fantasia'],
-        ''
-    )
-
-    colunas_finais = [
-        'codigo', 'razao_social', 'fantasia', 'cpf', 'rg', 'inscricao_estadual', 'inscricao_municipal',
-        'tipo', 'telefone', 'celular', 'email', 'site', 'data_nascimento', 'cep', 'endereco',
-        'numero', 'complemento', 'bairro', 'ponto_referencia', 'cidade', 'uf', 'pais', 'brasileiro',
-        'passaporte', 'sexo', 'veiculo', 'estado_civil', 'profissao', 'observacao'
-    ]
-    df_final = pd.DataFrame(columns=colunas_finais)
-
-    for campo in ['razao_social', 'fantasia', 'cpf', 'tipo', 'celular', 'email', 'cep', 'bairro', 'endereco', 'numero', 'cidade', 'uf']:
-        df_final[campo] = dados.get(campo, '')
-
-    df_final['cpf_temp'] = df_final['cpf']
-    df_final = df_final.groupby('cpf_temp', as_index=False).apply(escolher_mais_completo).reset_index(drop=True)
-    df_final.drop(columns='cpf_temp', inplace=True)
-
-    for col in df_final.columns:
-        df_final[col] = df_final[col].astype(str)
-
-    st.success("✅ Planilha formatada com sucesso!")
-
-    buffer = BytesIO()
-    df_final.to_excel(buffer, index=False)
-    buffer.seek(0)
-
-    st.download_button(
-        label="📥 Baixar Planilha Formatada",
-        data=buffer,
-        file_name="planilha_formatada_para_importacao.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+            df = pd.read_excel(uploaded_file)
+        
+        # Map source columns to target format
+        mapped_data = {}
+        for target_col, possible_names in COLUMN_MAPPING.items():
+            src_col = identify_column(possible_names, df.columns)
+            if src_col:
+                mapped_data[target_col] = df[src_col].astype(str)
+            else:
+                mapped_data[target_col] = np.nan
+        
+        # Clean and standardize document numbers
+        mapped_data['cpf'] = mapped_data['cpf'].apply(lambda x: re.sub(r'\D', '', str(x)))
+        mapped_data['cpf'] = mapped_data['cpf'].apply(lambda x: x if len(x) in [11, 14] else np.nan)
+        mapped_data['cpf'] = mapped_data['cpf'].fillna("")
+        mapped_data['tipo'] = mapped_data['cpf'].apply(detect_document_type)
+        
+        # Handle missing names
+        mapped_data['razao_social'] = mapped_data['razao_social'].fillna("NOME NAO INFORMADO")
+        
+        # Only show fantasy name for companies (PJ) when different from legal name
+        mapped_data['fantasia'] = np.where(
+            (mapped_data['tipo'] == 'J') & 
+            (mapped_data['fantasia'].notna()) & 
+            (mapped_data['fantasia'] != mapped_data['razao_social']),
+            mapped_data['fantasia'],
+            ''
+        )
+        
+        # Create output dataframe
+        output_df = pd.DataFrame(columns=TARGET_COLUMNS)
+        
+        # Populate output with mapped data
+        for field in ['razao_social', 'fantasia', 'cpf', 'tipo', 'celular', 
+                     'email', 'cep', 'bairro', 'endereco', 'numero', 'cidade', 'uf']:
+            output_df[field] = mapped_data.get(field, '')
+        
+        # Remove duplicates keeping most complete records
+        output_df['temp_cpf'] = output_df['cpf']
+        output_df = output_df.groupby('temp_cpf', as_index=False).apply(select_most_complete_row).reset_index(drop=True)
+        output_df.drop(columns='temp_cpf', inplace=True)
+        
+        # Convert all columns to string
+        output_df = output_df.astype(str)
+        
+        # Show success message
+        st.success(f"✅ Planilha formatada com sucesso! {len(output_df)} registros processados.")
+        
+        # Create download button
+        output_buffer = BytesIO()
+        output_df.to_excel(output_buffer, index=False)
+        output_buffer.seek(0)
+        
+        st.download_button(
+            label="📥 Baixar Planilha Formatada",
+            data=output_buffer,
+            file_name="planilha_formatada_importacao.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+        # Show preview
+        st.subheader("Pré-visualização dos dados")
+        st.dataframe(output_df.head())
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao processar o arquivo: {str(e)}")
+        st.info("Verifique se o arquivo está no formato correto e tente novamente.")

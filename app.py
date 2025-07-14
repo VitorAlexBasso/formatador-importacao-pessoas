@@ -113,7 +113,7 @@ st.title("🧾 Formatador de Planilhas para Importação de Pessoas")
 
 st.markdown("Faça upload de uma planilha com dados diversos (CPF, Razão Social, Email, etc.) e receba um arquivo formatado para importação.")
 
-uploaded_file = st.file_uploader("📁 Faça o upload da planilha", type=["xlsx", "xls", "csv"])
+uploaded_modelo = st.file_uploader("📁 Upload do modelo de destino", type=["xlsx"])
 
 # Dicionário de sinônimos para mapear colunas variadas
 colunas_referencia = {

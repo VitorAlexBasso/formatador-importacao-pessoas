@@ -15,7 +15,7 @@ st.set_page_config(
 COLUMN_MAPPINGS = {
     'razao_social': ['nome', 'razao social', 'cliente', 'empresa'],
     'fantasia': ['fantasia', 'nome fantasia'],
-    'documento': ['cpf', 'cnpj', 'documento', 'cpf/cnpj'],
+    'cpf': ['cpf', 'documento', 'cnpj', 'cpf/cnpj'],  # Alterado para priorizar 'cpf'
     'email': ['email', 'e-mail'],
     'celular': ['celular', 'whatsapp', 'telefone', 'telefone celular'],
     'cep': ['cep', 'código postal'],
@@ -27,7 +27,7 @@ COLUMN_MAPPINGS = {
 }
 
 TARGET_COLUMNS = [
-    'codigo', 'razao_social', 'fantasia', 'documento', 'tipo_pessoa',
+    'codigo', 'razao_social', 'fantasia', 'cpf', 'tipo_pessoa',  # Alterado 'documento' para 'cpf'
     'email', 'celular', 'cep', 'endereco', 'numero', 'complemento',
     'bairro', 'cidade', 'uf', 'observacoes'
 ]
@@ -99,16 +99,16 @@ def process_data(file):
         mapped_data = map_source_columns(df)
         
         # Validate required columns
-        if not any(doc in mapped_data for doc in ['documento', 'cpf', 'cnpj']):
+        if not any(doc in mapped_data for doc in ['cpf', 'documento', 'cnpj']):  # Atualizado para incluir 'cpf'
             st.error("Nenhuma coluna de documento (CPF/CNPJ) encontrada")
             return None
     
     # Step 3: Clean and transform
     with st.spinner("Processando dados..."):
         try:
-            # Clean document numbers
-            documents = mapped_data['documento'].apply(clean_document)
-            mapped_data['documento'], mapped_data['tipo_pessoa'] = zip(*documents)
+            # Clean document numbers - agora usando 'cpf' como chave
+            documents = mapped_data['cpf'].apply(clean_document)
+            mapped_data['cpf'], mapped_data['tipo_pessoa'] = zip(*documents)
             
             # Set default values
             mapped_data['razao_social'] = mapped_data.get('razao_social', pd.Series(["NÃO INFORMADO"] * len(df)))
@@ -121,7 +121,7 @@ def process_data(file):
             
             # Remove duplicates
             output_df = output_df.drop_duplicates(
-                subset=['documento'],
+                subset=['cpf'],  # Alterado para 'cpf'
                 keep='first'
             ).reset_index(drop=True)
             

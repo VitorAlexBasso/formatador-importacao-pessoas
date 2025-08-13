@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import unicodedata
 from io import BytesIO
 
 # ========== CONFIGURATION ==========
@@ -13,18 +14,20 @@ st.set_page_config(
 
 # ========== CONSTANTS ==========
 COLUMN_MAPPINGS = {
-    'razao_social': ['nome', 'razao social', 'cliente', 'empresa'],
-    'sobrenome': ['sobrenome', 'ultimo nome', 'último nome'],
+    'razao_social': ['nome e sobrenome', 'nome completo', 'razao social', 'razão social', 'cliente', 'empresa', 'contato', 'responsavel', 'responsável', 'nome'],
+    'sobrenome': ['sobrenome', 'ultimo nome', 'último nome', 'sobre nome', 'ultimo sobrenome', 'apelido'],
+    'primeiro_nome': ['primeiro nome', 'nome', 'nome do cliente', 'nome pessoa'],
     'fantasia': ['fantasia', 'nome fantasia'],
-    'cpf': ['cpf', 'documento', 'cnpj', 'cpf/cnpj'],
+    'cpf': ['cpf/cnpj', 'cpf', 'cnpj', 'documento'],
     'email': ['email', 'e-mail'],
     'celular': ['celular', 'whatsapp', 'telefone', 'telefone celular'],
-    'cep': ['cep', 'código postal'],
-    'endereco': ['endereco', 'logradouro', 'rua'],
+    'cep': ['cep', 'codigo postal', 'código postal'],
+    'endereco': ['endereco', 'endereço', 'logradouro', 'rua'],
     'numero': ['numero', 'número', 'num'],
     'bairro': ['bairro', 'distrito'],
-    'cidade': ['cidade', 'município', 'municipio'],
-    'uf': ['uf', 'estado', 'unidade federativa']
+    'cidade': ['cidade', 'municipio', 'município'],
+    'uf': ['uf', 'estado', 'unidade federativa'],
+    'observacoes': ['observacoes', 'observações', 'obs', 'observacao', 'observacões']
 }
 
 TARGET_COLUMNS = [
@@ -34,12 +37,24 @@ TARGET_COLUMNS = [
 ]
 
 # ========== FUNCTIONS ==========
+def strip_accents(s: str) -> str:
+    if not isinstance(s, str):
+        s = str(s) if s is not None else ""
+    return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
+
+def norm_text(s: str) -> str:
+    s = strip_accents(s).lower()
+    return re.sub(r'\s+', ' ', s).strip()
+
+def clean_str_series(ser: pd.Series) -> pd.Series:
+    ser = ser.astype(str).replace({np.nan: ""})
+    ser = ser.map(lambda x: "" if norm_text(x) in {"nan", "none", "na", "n/a", ""} else x.strip())
+    return ser
+
 def clean_document(doc):
-    """Clean and classify document numbers"""
     if pd.isna(doc) or str(doc).strip() == "":
         return "", ""
-    
-    doc_clean = re.sub(r'\D', '', str(doc))
+    doc_clean = re.sub(r"\D", "", str(doc))
     if len(doc_clean) == 11:
         return doc_clean, "F"
     elif len(doc_clean) == 14:
@@ -47,42 +62,33 @@ def clean_document(doc):
     return doc_clean, ""
 
 def read_uploaded_file(file):
-    """Handle all file reading scenarios"""
     try:
         if file.name.lower().endswith('.csv'):
             for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'windows-1252']:
                 try:
-                    return pd.read_csv(
-                        file,
-                        encoding=encoding,
-                        sep=None,
-                        engine='python',
-                        on_bad_lines='warn'
-                    )
+                    return pd.read_csv(file, encoding=encoding, sep=None, engine='python', on_bad_lines='warn')
                 except (UnicodeDecodeError, pd.errors.ParserError):
                     file.seek(0)
                     continue
             raise ValueError("Não foi possível determinar a codificação do arquivo CSV")
         else:
-            return pd.read_excel(file)
+            return pd.read_excel(file, dtype=object)
     except Exception as e:
         st.error(f"ERRO NA LEITURA: {str(e)}")
         return None
 
 def map_source_columns(df):
-    """Intelligently map source columns to target format"""
     mapped = {}
     for target_col, possible_names in COLUMN_MAPPINGS.items():
         for src_col in df.columns:
-            if any(name.lower() in str(src_col).lower() for name in possible_names):
-                mapped[target_col] = df[src_col].astype(str)
+            if any(name.lower() in norm_text(str(src_col)) for name in possible_names):
+                mapped[target_col] = clean_str_series(df[src_col])
                 break
         else:
             mapped[target_col] = pd.Series([""] * len(df), dtype=str)
     return mapped
 
 def process_data(file):
-    """Main data processing pipeline"""
     if file is None:
         return None
     
@@ -95,7 +101,7 @@ def process_data(file):
     with st.spinner("Mapeando colunas..."):
         mapped_data = map_source_columns(df)
         
-        if not any(doc in mapped_data for doc in ['cpf', 'documento', 'cnpj']):
+        if 'cpf' not in mapped_data or mapped_data['cpf'].eq("").all():
             st.error("Nenhuma coluna de documento (CPF/CNPJ) encontrada")
             return None
     
@@ -104,27 +110,29 @@ def process_data(file):
             documents = mapped_data['cpf'].apply(clean_document)
             mapped_data['cpf'], mapped_data['tipo_pessoa'] = zip(*documents)
             
-            # Combina Nome + Sobrenome se não houver nome completo
-            if mapped_data['razao_social'].eq("").all() and 'sobrenome' in mapped_data:
-                mapped_data['razao_social'] = (
-                    mapped_data.get('razao_social', pd.Series([""] * len(df))).fillna("").astype(str).str.strip() + " " +
-                    mapped_data.get('sobrenome', pd.Series([""] * len(df))).fillna("").astype(str).str.strip()
-                ).str.strip()
+            # Monta razao_social
+            rs = mapped_data['razao_social']
+            sn = mapped_data['sobrenome']
+            pn = mapped_data['primeiro_nome']
             
-            mapped_data['razao_social'] = mapped_data.get(
-                'razao_social',
-                pd.Series(["NÃO INFORMADO"] * len(df))
-            )
+            rs_has_space = rs.str.contains(r"\s", regex=True)
+            need_concat = (~rs_has_space) & (rs != "") & (sn != "")
+            rs = rs.where(~need_concat, (rs + " " + sn).str.strip())
+            
+            empty_rs = (rs == "")
+            rs = rs.where(~empty_rs, (pn + " " + sn).str.strip())
+            rs = rs.map(lambda x: x if x.strip() else "NÃO INFORMADO")
+            
+            mapped_data['razao_social'] = rs
             
             output_df = pd.DataFrame({
                 col: mapped_data.get(col.lower(), [""] * len(df))
                 for col in TARGET_COLUMNS
             })
             
-            output_df = output_df.drop_duplicates(
-                subset=['cpf'],
-                keep='first'
-            ).reset_index(drop=True)
+            output_df['uf'] = output_df['uf'].astype(str).str.strip().str.upper().str[:2]
+            
+            output_df = output_df.drop_duplicates(subset=['cpf'], keep='first').reset_index(drop=True)
             
             return output_df
             
@@ -151,7 +159,6 @@ def main():
         
         if result is not None:
             st.success(f"✅ Processamento concluído! {len(result)} registros formatados.")
-            
             st.subheader("Pré-visualização dos dados")
             st.dataframe(result.head())
             

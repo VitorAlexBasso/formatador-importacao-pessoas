@@ -14,8 +14,9 @@ st.set_page_config(
 # ========== CONSTANTS ==========
 COLUMN_MAPPINGS = {
     'razao_social': ['nome', 'razao social', 'cliente', 'empresa'],
+    'sobrenome': ['sobrenome', 'ultimo nome', 'último nome'],
     'fantasia': ['fantasia', 'nome fantasia'],
-    'cpf': ['cpf', 'documento', 'cnpj', 'cpf/cnpj'],  # Alterado para priorizar 'cpf'
+    'cpf': ['cpf', 'documento', 'cnpj', 'cpf/cnpj'],
     'email': ['email', 'e-mail'],
     'celular': ['celular', 'whatsapp', 'telefone', 'telefone celular'],
     'cep': ['cep', 'código postal'],
@@ -27,7 +28,7 @@ COLUMN_MAPPINGS = {
 }
 
 TARGET_COLUMNS = [
-    'codigo', 'razao_social', 'fantasia', 'cpf', 'tipo_pessoa',  # Alterado 'documento' para 'cpf'
+    'codigo', 'razao_social', 'fantasia', 'cpf', 'tipo_pessoa',
     'email', 'celular', 'cep', 'endereco', 'numero', 'complemento',
     'bairro', 'cidade', 'uf', 'observacoes'
 ]
@@ -49,13 +50,12 @@ def read_uploaded_file(file):
     """Handle all file reading scenarios"""
     try:
         if file.name.lower().endswith('.csv'):
-            # Try multiple encodings and delimiters
             for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'windows-1252']:
                 try:
                     return pd.read_csv(
                         file,
                         encoding=encoding,
-                        sep=None,  # Auto-detect delimiter
+                        sep=None,
                         engine='python',
                         on_bad_lines='warn'
                     )
@@ -73,7 +73,6 @@ def map_source_columns(df):
     """Intelligently map source columns to target format"""
     mapped = {}
     for target_col, possible_names in COLUMN_MAPPINGS.items():
-        # Find first matching column
         for src_col in df.columns:
             if any(name.lower() in str(src_col).lower() for name in possible_names):
                 mapped[target_col] = df[src_col].astype(str)
@@ -87,41 +86,43 @@ def process_data(file):
     if file is None:
         return None
     
-    # Step 1: Read file
     with st.spinner("Lendo arquivo..."):
         df = read_uploaded_file(file)
         if df is None or df.empty:
             st.error("Arquivo vazio ou inválido")
             return None
     
-    # Step 2: Map columns
     with st.spinner("Mapeando colunas..."):
         mapped_data = map_source_columns(df)
         
-        # Validate required columns
-        if not any(doc in mapped_data for doc in ['cpf', 'documento', 'cnpj']):  # Atualizado para incluir 'cpf'
+        if not any(doc in mapped_data for doc in ['cpf', 'documento', 'cnpj']):
             st.error("Nenhuma coluna de documento (CPF/CNPJ) encontrada")
             return None
     
-    # Step 3: Clean and transform
     with st.spinner("Processando dados..."):
         try:
-            # Clean document numbers - agora usando 'cpf' como chave
             documents = mapped_data['cpf'].apply(clean_document)
             mapped_data['cpf'], mapped_data['tipo_pessoa'] = zip(*documents)
             
-            # Set default values
-            mapped_data['razao_social'] = mapped_data.get('razao_social', pd.Series(["NÃO INFORMADO"] * len(df)))
+            # Combina Nome + Sobrenome se não houver nome completo
+            if mapped_data['razao_social'].eq("").all() and 'sobrenome' in mapped_data:
+                mapped_data['razao_social'] = (
+                    mapped_data.get('razao_social', pd.Series([""] * len(df))).fillna("").astype(str).str.strip() + " " +
+                    mapped_data.get('sobrenome', pd.Series([""] * len(df))).fillna("").astype(str).str.strip()
+                ).str.strip()
             
-            # Create output DataFrame
+            mapped_data['razao_social'] = mapped_data.get(
+                'razao_social',
+                pd.Series(["NÃO INFORMADO"] * len(df))
+            )
+            
             output_df = pd.DataFrame({
                 col: mapped_data.get(col.lower(), [""] * len(df))
                 for col in TARGET_COLUMNS
             })
             
-            # Remove duplicates
             output_df = output_df.drop_duplicates(
-                subset=['cpf'],  # Alterado para 'cpf'
+                subset=['cpf'],
                 keep='first'
             ).reset_index(drop=True)
             
@@ -139,25 +140,21 @@ def main():
     Suporta arquivos CSV e Excel (XLSX, XLS)
     """)
     
-    # File upload
     uploaded_file = st.file_uploader(
         "Selecione seu arquivo",
         type=["csv", "xlsx", "xls"],
         help="Arquivos CSV devem conter cabeçalhos na primeira linha"
     )
     
-    # Process data when file is uploaded
     if uploaded_file:
         result = process_data(uploaded_file)
         
         if result is not None:
             st.success(f"✅ Processamento concluído! {len(result)} registros formatados.")
             
-            # Preview
             st.subheader("Pré-visualização dos dados")
             st.dataframe(result.head())
             
-            # Download
             output = BytesIO()
             result.to_excel(output, index=False)
             output.seek(0)
@@ -169,7 +166,6 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
     
-    # Help section
     with st.expander("ℹ️ Precisa de ajuda?"):
         st.markdown("""
         **Soluções para problemas comuns:**
